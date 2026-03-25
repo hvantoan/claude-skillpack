@@ -1,5 +1,5 @@
 ---
-name: tiptap
+name: cps:tiptap
 description: "Build rich text editors with Tiptap (open-source, free tier). React 19, Tailwind v4, shadcn/ui. Editor setup, SSR config, image uploads, free extensions, markdown, prose styling, troubleshooting. Excludes Pro/paid extensions (collaboration, comments, AI, version history)."
 ---
 
