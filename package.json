@@ -1,0 +1,26 @@
+{
+  "name": "claude-skillpack",
+  "version": "1.0.0",
+  "description": "CLI to store and install Claude Code skills quickly on new projects or machines",
+  "bin": {
+    "claude-skillpack": "./bin/cli.js",
+    "csp": "./bin/cli.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "skills/"
+  ],
+  "keywords": [
+    "claude",
+    "claude-code",
+    "skills",
+    "cli",
+    "installer"
+  ],
+  "author": "vif",
+  "license": "MIT",
+  "engines": {
+    "node": ">=16.7.0"
+  }
+}
