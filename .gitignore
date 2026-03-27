@@ -8,3 +8,5 @@ skills/**/node_modules/
 skills/**/__pycache__/
 skills/**/*.pyc
 plans/
+.claude
+.agents
