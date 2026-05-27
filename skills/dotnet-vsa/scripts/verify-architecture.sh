@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# verify-architecture.sh — Check .NET VSA project architecture compliance
+# verify-architecture.sh — Check .NET VSA project architecture compliance (FastEndpoints)
 # Usage: ./verify-architecture.sh [project-path]
 # Exit codes: 0=all checks pass, 1=violations found
 
@@ -19,7 +19,7 @@ header() { echo -e "\n$1"; }
 
 CSPROJ=$(find "$PROJECT_DIR" -name "*.csproj" -not -path "*/bin/*" -not -path "*/obj/*" -not -path "*/Test*/*" 2>/dev/null | head -1)
 
-header "=== .NET VSA Architecture Verification ==="
+header "=== .NET VSA Architecture Verification (FastEndpoints) ==="
 
 # ─── 1. Project Structure ───
 header "1. Project Structure"
@@ -31,27 +31,50 @@ header "1. Project Structure"
 FEATURE_DIRS=$(find "$PROJECT_DIR/Features" -mindepth 2 -maxdepth 2 -type d 2>/dev/null | wc -l)
 [ "$FEATURE_DIRS" -gt 0 ] && pass "Feature slices found ($FEATURE_DIRS)" || warn "No feature slice folders found under Features/"
 
-# ─── 2. Endpoint Convention ───
-header "2. Endpoint Convention"
+# Check for FastEndpoints-named folders
+[ -d "$PROJECT_DIR/Shared/Groups" ] && pass "Shared/Groups/ directory exists (route groups)" || warn "Missing Shared/Groups/ — create for route group definitions"
+[ -d "$PROJECT_DIR/Shared/Processors" ] && pass "Shared/Processors/ directory exists (pre/post-processors)" || warn "Missing Shared/Processors/ — create for cross-cutting processors"
 
-ENDPOINT_FILES=$(grep -rl "IEndpoint" "$PROJECT_DIR/Features" --include="*.cs" 2>/dev/null || true)
+# ─── 2. FastEndpoints Convention ───
+header "2. FastEndpoints Convention"
+
+ENDPOINT_FILES=$(grep -rl "Endpoint<" "$PROJECT_DIR/Features" --include="*.cs" 2>/dev/null || true)
 if [ -n "$ENDPOINT_FILES" ]; then
     ENDPOINT_COUNT=$(echo "$ENDPOINT_FILES" | wc -l)
-    pass "IEndpoint implementations found ($ENDPOINT_COUNT)"
+    pass "FastEndpoints endpoint classes found ($ENDPOINT_COUNT)"
 else
-    fail "No IEndpoint implementations found"
+    fail "No FastEndpoints endpoint classes found (expected Endpoint<TRequest, TResponse>)"
 fi
 
-STATIC_HANDLERS=$(grep -rn "public static.*Task<IResult> Handle" "$PROJECT_DIR/Features" --include="*.cs" 2>/dev/null || true)
-[ -n "$STATIC_HANDLERS" ] && pass "Static Handle methods found" || warn "No static Handle methods found in Features/"
+# Check for legacy IEndpoint pattern
+LEGACY_IENDPOINT=$(grep -rl "IEndpoint" "$PROJECT_DIR/Features" --include="*.cs" 2>/dev/null || true)
+if [ -n "$LEGACY_IENDPOINT" ]; then
+    fail "Legacy IEndpoint pattern found — migrate to FastEndpoints Endpoint<TReq, TRes>"
+else
+    pass "No legacy IEndpoint pattern detected"
+fi
 
-AUTH_REQUIRED=$(grep -rn "RequireAuthorization" "$PROJECT_DIR/Features" --include="*.cs" 2>/dev/null || true)
-[ -n "$AUTH_REQUIRED" ] && pass "RequireAuthorization() found on endpoints" || warn "No RequireAuthorization() on endpoints — verify if intentional"
+# Check Configure method
+CONFIGURE_METHODS=$(grep -rn "override void Configure" "$PROJECT_DIR/Features" --include="*.cs" 2>/dev/null || true)
+[ -n "$CONFIGURE_METHODS" ] && pass "Configure() overrides found" || warn "No Configure() overrides found in Features/"
+
+# Check HandleAsync method
+HANDLEASYNC_METHODS=$(grep -rn "override async Task HandleAsync" "$PROJECT_DIR/Features" --include="*.cs" 2>/dev/null || true)
+[ -n "$HANDLEASYNC_METHODS" ] && pass "HandleAsync() overrides found" || warn "No HandleAsync() overrides found in Features/"
+
+# Check authorization (Policies or AllowAnonymous)
+POLICIES=$(grep -rn "Policies(" "$PROJECT_DIR/Features" --include="*.cs" 2>/dev/null || true)
+ALLOW_ANON=$(grep -rn "AllowAnonymous()" "$PROJECT_DIR/Features" --include="*.cs" 2>/dev/null || true)
+if [ -n "$POLICIES" ] || [ -n "$ALLOW_ANON" ]; then
+    pass "Authorization configured on endpoints (Policies or AllowAnonymous)"
+else
+    warn "No Policies() or AllowAnonymous() on endpoints — verify if intentional"
+fi
 
 # ─── 3. FluentValidation ───
 header "3. FluentValidation"
 
-VALIDATORS=$(grep -rl "AbstractValidator" "$PROJECT_DIR" --include="*.cs" 2>/dev/null || true)
+VALIDATORS=$(grep -rl "Validator<\|AbstractValidator" "$PROJECT_DIR" --include="*.cs" 2>/dev/null || true)
 if [ -n "$VALIDATORS" ]; then
     VALIDATOR_COUNT=$(echo "$VALIDATORS" | wc -l)
     pass "FluentValidation validators found ($VALIDATOR_COUNT)"
@@ -70,7 +93,6 @@ AUTH_HANDLER=$(find "$PROJECT_DIR" -name "*AuthenticationHandler*.cs" -not -path
 if [ -n "$AUTH_HANDLER" ]; then
     pass "Authentication handler found"
     grep -q "FixedTimeEquals" "$AUTH_HANDLER" 2>/dev/null && pass "FixedTimeEquals used for timing-safe comparison" || fail "FixedTimeEquals NOT used — vulnerable to timing attacks"
-    # Check timestamp validation
     TIMESTAMP_LINES=$(grep -n "Timestamp\|timestamp" "$AUTH_HANDLER" 2>/dev/null || true)
     if echo "$TIMESTAMP_LINES" | grep -qi "expire\|skew\|tolerance\|valid\|window\|maxage" 2>/dev/null; then
         pass "Timestamp expiration/validation found"
@@ -105,7 +127,6 @@ header "6. Message Queue (RabbitMQ)"
 MQ_IMPL=$(find "$PROJECT_DIR" \( -name "*MessageQueue*" -o -name "*RabbitMq*" \) -name "*.cs" -not -path "*/bin/*" -not -path "*/obj/*" 2>/dev/null | grep -v "Interface\|IMessage" || true)
 if [ -n "$MQ_IMPL" ]; then
     pass "Message queue implementation found"
-    # Only check implementation files (not interfaces)
     MQ_IMPL_FILES=$(echo "$MQ_IMPL" | grep -v "^.*IMessageQueueService.cs$" || true)
     for f in $MQ_IMPL_FILES; do
         grep -q "AutomaticRecoveryEnabled" "$f" 2>/dev/null && pass "RabbitMQ auto-recovery enabled" || fail "RabbitMQ AutomaticRecoveryEnabled NOT set — connection drops cause manual restart"
@@ -116,8 +137,34 @@ else
     pass "No message queue (nothing to check)"
 fi
 
-# ─── 7. Code Style ───
-header "7. Code Style"
+# ─── 7. FastEndpoints Registration ───
+header "7. FastEndpoints Registration"
+
+if [ -f "$PROJECT_DIR/Program.cs" ]; then
+    grep -q "AddFastEndpoints" "$PROJECT_DIR/Program.cs" 2>/dev/null && pass "AddFastEndpoints() found in Program.cs" || fail "AddFastEndpoints() not found — required for FastEndpoints"
+    grep -q "UseFastEndpoints" "$PROJECT_DIR/Program.cs" 2>/dev/null && pass "UseFastEndpoints() found in Program.cs" || fail "UseFastEndpoints() not found — required for FastEndpoints pipeline"
+fi
+
+# Check for route groups
+GROUP_FILES=$(find "$PROJECT_DIR" -name "*Group*.cs" -not -path "*/bin/*" -not -path "*/obj/*" 2>/dev/null)
+if [ -n "$GROUP_FILES" ]; then
+    GROUP_COUNT=$(echo "$GROUP_FILES" | wc -l)
+    pass "Route group definitions found ($GROUP_COUNT)"
+else
+    warn "No route group definitions found — consider using Groups for shared behaviors"
+fi
+
+# Check for processors
+PROCESSOR_FILES=$(find "$PROJECT_DIR" -name "*Processor*.cs" -not -path "*/bin/*" -not -path "*/obj/*" 2>/dev/null)
+if [ -n "$PROCESSOR_FILES" ]; then
+    PROCESSOR_COUNT=$(echo "$PROCESSOR_FILES" | wc -l)
+    pass "Pre/Post-processor definitions found ($PROCESSOR_COUNT)"
+else
+    warn "No pre/post-processors found — consider adding for logging, timing, etc."
+fi
+
+# ─── 8. Code Style ───
+header "8. Code Style"
 
 CS_FILES=$(find "$PROJECT_DIR" -name "*.cs" -not -path "*/bin/*" -not -path "*/obj/*" 2>/dev/null)
 TOTAL_CS=$(echo "$CS_FILES" | wc -l)
@@ -137,8 +184,8 @@ else
     warn "No .editorconfig found — run: dotnet-vsa generate-editorconfig"
 fi
 
-# ─── 8. Testing ───
-header "8. Testing"
+# ─── 9. Testing ───
+header "9. Testing"
 
 PARENT_DIR=$(dirname "$PROJECT_DIR")
 TEST_DIR=$(find "$PARENT_DIR" -maxdepth 1 -name "*Tests*" -type d 2>/dev/null | head -1)
@@ -167,21 +214,19 @@ if [ -n "$TEST_DIR" ] && [ -d "$TEST_DIR" ]; then
     if [ -n "$ARCH_TESTS" ]; then
         pass "Architecture tests found"
     else
-        warn "No architecture tests found — add tests enforcing IEndpoint and static Handle conventions"
+        warn "No architecture tests found — add tests enforcing FastEndpoints conventions"
     fi
 else
     warn "No test project found"
 fi
 
-# ─── 9. Domain Model Quality ───
-header "9. Domain Model Quality"
+# ─── 10. Domain Model Quality ───
+header "10. Domain Model Quality"
 
-# Check for anemic domain models (entities with only { get; set; } and no methods)
 CS_ENTITY_FILES=$(find "$PROJECT_DIR/Shared/Domain" -name "*.cs" -not -path "*/bin/*" 2>/dev/null)
 if [ -n "$CS_ENTITY_FILES" ]; then
     ANEMIC_COUNT=0
     for f in $CS_ENTITY_FILES; do
-        # Check if file has only auto-properties (get; set;) and no methods
         HAS_METHODS=$(grep -c "public.*void\|public.*Task\|public static\|private.*void\|private static" "$f" 2>/dev/null || echo "0")
         HAS_ONLY_PROPS=$(grep -c "{ get; set; }" "$f" 2>/dev/null || echo "0")
         if [ "$HAS_METHODS" -eq 0 ] && [ "$HAS_ONLY_PROPS" -gt 0 ]; then
@@ -196,14 +241,13 @@ else
     pass "No Shared/Domain/ folder (no domain objects to check)"
 fi
 
-# ─── 10. Shared Logic Hygiene ───
-header "10. Shared Logic Hygiene"
+# ─── 11. Shared Logic Hygiene ───
+header "11. Shared Logic Hygiene"
 
-# Check Shared/ folder for junk drawer patterns
 SHARED_DIR="$PROJECT_DIR/Shared"
 if [ -d "$SHARED_DIR" ]; then
     # Check for vague folder names that indicate junk drawer
-    JUNK_FOLDERS=$(find "$SHARED_DIR" -maxdepth 1 -type d \( -name "Helpers" -o -name "Utils" -o -name "Common" -o -name "Misc" -o -name "Extensions" \) 2>/dev/null)
+    JUNK_FOLDERS=$(find "$SHARED_DIR" -maxdepth 1 -type d \( -name "Helpers" -o -name "Utils" -o -name "Common" -o -name "Misc" \) 2>/dev/null)
     if [ -n "$JUNK_FOLDERS" ]; then
         for f in $JUNK_FOLDERS; do
             warn "Potential junk drawer: $(basename "$f")/ — consider moving contents to specific feature slices or Tier 1/2 locations"
@@ -216,7 +260,7 @@ if [ -d "$SHARED_DIR" ]; then
     SHARED_CS=$(find "$SHARED_DIR" -name "*.cs" -not -path "*/bin/*" -not -path "*/obj/*" 2>/dev/null)
     SHARED_HANDLER_COUNT=0
     for f in $SHARED_CS; do
-        grep -q "IResult\|Task<IResult>" "$f" 2>/dev/null && ((SHARED_HANDLER_COUNT++))
+        grep -q "HandleAsync\|IResult\|Task<IResult>" "$f" 2>/dev/null && ((SHARED_HANDLER_COUNT++))
     done
     if [ "$SHARED_HANDLER_COUNT" -gt 0 ]; then
         fail "Found $SHARED_HANDLER_COUNT handler(s) in Shared/ — endpoint logic belongs in Features/ slices"
@@ -227,19 +271,23 @@ else
     pass "No Shared/ folder (nothing to check)"
 fi
 
-# ─── 11. Response Type Safety ───
-header "11. Response Type Safety"
+# ─── 12. Response Type Safety ───
+header "12. Response Type Safety"
 
-# Check if project uses anonymous objects in endpoints (could migrate to TypedResults)
-ANON_RETURN_COUNT=$(grep -rn "Results\.\(Ok\|BadRequest\|Accepted\|NotFound\|Created\).*new {" "$PROJECT_DIR/Features" --include="*.cs" 2>/dev/null | wc -l)
-TYPED_RETURN_COUNT=$(grep -rn "TypedResults\." "$PROJECT_DIR" --include="*.cs" 2>/dev/null | wc -l)
-
-if [ "$TYPED_RETURN_COUNT" -gt 0 ]; then
-    pass "TypedResults usage found ($TYPED_RETURN_COUNT occurrences)"
-elif [ "$ANON_RETURN_COUNT" -gt 0 ]; then
-    warn "Using anonymous objects for responses ($ANON_RETURN_COUNT occurrences) — consider TypedResults for Swagger schema generation"
+# Check for Send method usage (FastEndpoints pattern)
+SEND_METHODS=$(grep -rn "SendAsync\|Send\.Ok\|Send\.Created\|Send\.Accepted\|Send\.NotFound" "$PROJECT_DIR/Features" --include="*.cs" 2>/dev/null | wc -l)
+if [ "$SEND_METHODS" -gt 0 ]; then
+    pass "FastEndpoints Send methods used ($SEND_METHODS occurrences)"
 else
-    pass "No response patterns detected (new project or different pattern)"
+    warn "No FastEndpoints Send methods detected — verify response pattern"
+fi
+
+# Check for typed response records
+RESPONSE_RECORDS=$(grep -rn "record.*Response" "$PROJECT_DIR" --include="*.cs" 2>/dev/null | wc -l)
+if [ "$RESPONSE_RECORDS" -gt 0 ]; then
+    pass "Typed response records found ($RESPONSE_RECORDS)"
+else
+    warn "No typed response records found — consider defining Result<T> and PagedData<T>"
 fi
 
 # ─── Summary ───
@@ -248,7 +296,7 @@ echo -e "  Violations: ${RED}$VIOLATIONS${NC}"
 echo -e "  Warnings:   ${YELLOW}$WARNINGS${NC}"
 
 echo ""
-echo "  Checks: 11 (Structure, Endpoints, Validation, Auth, Resilience, MQ, Code Style, Testing, Domain Model, Shared Hygiene, Response Types)"
+echo "  Checks: 12 (Structure, FastEndpoints, Validation, Auth, Resilience, MQ, Registration, Code Style, Testing, Domain Model, Shared Hygiene, Response Types)"
 
 if [ "$VIOLATIONS" -gt 0 ]; then
     echo -e "\n${RED}ARCHITECTURE CHECK FAILED${NC} — $VIOLATIONS violation(s) found"

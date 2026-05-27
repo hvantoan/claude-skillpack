@@ -1,205 +1,180 @@
-# Architectural Decisions — MediatR, Cross-Cutting Concerns, Response Types, Scaling
+# Architectural Decisions — FastEndpoints, Shared Behaviors, Response Types, Scaling
 
-## MediatR vs Minimal API (Decision Guide)
+## FastEndpoints vs MediatR
 
-### Minimal API + IEndpoint (Recommended for this skill)
+| Aspect | FastEndpoints | MediatR |
+|--------|--------------|---------|
+| Files per feature | Endpoint + Request + Response + Validator | Command + Handler + Validator + Controller + registration |
+| Control flow | Direct, traceable (F12 works) | Indirect (dispatched via mediator) |
+| Cross-cutting | Pre/Post-processors + Groups | IPipelineBehavior |
+| Validation | Built-in FluentValidation integration | Manual wiring |
+| Swagger | Built-in Summary/Description support | Extra config |
+| Event bus | Built-in in-process event bus | INotification |
+| Dependency | Open-source, active | Commercial since 2024 |
 
-| Aspect | Minimal API + IEndpoint | MediatR |
-|--------|----------------------|---------|
-| **Files per feature** | 1 endpoint + 1 request + 1 validator | 1 command + 1 handler + 1 validator + 1 controller endpoint + registration |
-| **Control flow** | Direct, traceable (F12 works) | Indirect (dispatched via mediator) |
-| **Cross-cutting** | Middleware + endpoint filters | IPipelineBehavior |
-| **Testability** | Static handler method, no HTTP host | Handler class, no HTTP host |
-| **Boilerplate** | Low | High ceremony for simple ops |
-| **Dependency** | None (built-in) | External package (commercial since 2024) |
+Use MediatR only for: true CQRS with separate read/write models, legacy brownfield projects, or complex pipeline ordering requiring centralized behavior chains.
 
-### When to Use MediatR Instead
+## Shared Behaviors — Groups & Processors
 
-- **True CQRS** with separate read/write models and different databases
-- **Complex pipeline behaviors** that benefit from centralized ordering (validation → auth → logging → handler)
-- **Event-driven architecture** with in-process events (INotification)
-- **Multiple handlers** for the same request type (rare, usually a design smell)
+**Core Principle:** Behavior ≠ Model. Share behaviors via Groups/processors; keep models separate per endpoint.
 
-### When Minimal API is Better
-
-- Standard CRUD APIs (most cases)
-- Teams that value explicit control flow over abstraction
-- Projects that want zero external dependency for dispatch
-- When you want F12/Go-to-Definition to actually work
-
-### Cross-Cutting Concerns Without MediatR
-
-Replace `IPipelineBehavior` with:
-
-1. **Middleware** — for all requests (exception handling, logging)
-2. **Endpoint Filters** (.NET 8+) — for specific route groups
+### Route Groups — Shared Behavior Container
 
 ```csharp
-// Endpoint filter for validation + logging
-public class ValidationFilter<TRequest> : IEndpointFilter {
-    public async ValueTask<object?> InvokeAsync(
-        EndpointFilterInvocationContext ctx,
-        EndpointFilterDelegate next) {
-        var request = ctx.Arguments.OfType<TRequest>().First();
-        var validator = ctx.HttpContext.RequestServices
-            .GetRequiredService<IValidator<TRequest>>();
-        var result = await validator.ValidateAsync(request);
-        if (!result.IsValid)
-            return Results.BadRequest(new { success = false, errors = result.Errors.Select(e => e.ErrorMessage) });
-        return await next(ctx);
+public class OrderGroup : Group {
+    public OrderGroup() {
+        Configure("orders", ep => {
+            ep.Policies("PartnerOnly");
+            ep.Description(x => x.WithTags("Orders"));
+        });
+    }
+}
+```
+
+### Processor Attachment Options
+
+```csharp
+// 1. Global (all endpoints) — Program.cs configurator
+app.UseFastEndpoints(config => {
+    config.Endpoints.Configurator = ep => {
+        ep.PreProcessor<RequestLoggingProcessor<object>>(Order.Before);
+    };
+});
+
+// 2. Group-level — shared behavior for domain endpoints
+public class OrderGroup : Group {
+    public OrderGroup() {
+        Configure("orders", ep => {
+            ep.PreProcessor<OrderValidationProcessor>();
+        });
     }
 }
 
-// Registration
-app.MapPost("/api/v1/transactions", Handle)
-   .AddEndpointFilter<ValidationFilter<CreateTransactionRequest>>();
+// 3. Endpoint-specific
+public override void Configure() {
+    PreProcessor<IdempotencyCheckProcessor<CreateOrderRequest>>();
+    PostProcessor<AuditLogProcessor<CreateOrderRequest, Result<OrderDto>>>();
+}
 ```
 
-3. **Native DI Decorators** — replace pipeline behaviors with typed decorators
+### Shared vs Separate Models
+
+| Scenario | Model | Behavior |
+|----------|-------|----------|
+| 2 endpoints, different actions | Separate DTO per endpoint | Shared via Group |
+| Same business logic | Domain entity (Tier 2) | Shared via Group |
+| Cross-cutting (logging, auth) | N/A | Shared via global processors |
+
+## Result<T> Envelope
 
 ```csharp
-// Using Scrutor or manual decorator registration
-builder.Services.AddTransient<IOrderService>(sp => {
-    var inner = new OrderService(sp.GetRequiredService<AppDbContext>());
-    return new LoggingOrderServiceDecorator(inner, sp.GetRequiredService<ILogger<LoggingOrderServiceDecorator>>());
+public record Result<T> {
+    public bool Success { get; init; }
+    public T? Data { get; init; }
+    public string? Message { get; init; }
+    public string[]? Errors { get; init; }
+
+    public static Result<T> Ok(T data) => new() { Success = true, Data = data };
+    public static Result<T> Fail(string message, string[]? errors = null) =>
+        new() { Success = false, Message = message, Errors = errors };
+}
+
+public record PagedData<T>(List<T> Items, int TotalCount, int Page, int PageSize);
+```
+
+### Usage Patterns
+
+```csharp
+// Success
+await SendOkAsync(Result<OrderDto>.Ok(orderDto), ct);
+await SendCreatedAsync($"/api/v1/orders/{order.Id}", Result<OrderDto>.Ok(orderDto), ct);
+
+// Error
+await SendAsync(Result<OrderDto>.Fail("Not found"), 404, ct);
+
+// Paged
+await SendOkAsync(Result<PagedData<OrderDto>>.Ok(pagedData), ct);
+
+// Override for special cases (file downloads, etc.)
+public class DownloadReportEndpoint : Endpoint<DownloadReportRequest, FileResult> { ... }
+```
+
+### Setup (Program.cs)
+
+```csharp
+builder.Services.ConfigureHttpJsonOptions(o =>
+    o.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull);
+
+app.UseFastEndpoints(config => {
+    config.Errors.ResponseBuilder = (failures, ctx) =>
+        Result<object>.Fail("Validation failed", failures.Select(f => f.ErrorMessage).ToArray());
 });
 ```
 
-## Response Type Safety
+### Factory Method Rules
 
-### Current: Anonymous Objects (Simple but Untyped)
+- Always use `Result<T>.Ok(data)` — never `new Result<T> { Success = true, ... }`
+- Always use `Result<T>.Fail(message, errors)` — never `new Result<T> { Success = false, ... }`
+- Architecture test: grep for `new Result<` outside of `Result.cs` → violation
+
+## Cross-Cutting Concerns
+
+### Global Exception Handling (Middleware)
+
 ```csharp
-return Results.Ok(new { success = true, data = order });
-return Results.BadRequest(new { success = false, message = "Invalid" });
-```
-- ✅ Fast to write, no extra types
-- ❌ No Swagger schema, no compile-time shape guarantee
-
-### Recommended: Typed Results (.NET 9+)
-```csharp
-// Define result types
-public record SuccessResponse<T>(bool Success, T Data);
-public record ErrorResponse(bool Success, string Message, string[]? Errors = null);
-
-// Use in endpoints
-public static Results<Accepted<SuccessResponse<string>>, BadRequest<ErrorResponse>> Handle(...) {
-    if (!validation.IsValid)
-        return TypedResults.BadRequest(new ErrorResponse(false, "Validation failed", errors));
-    return TypedResults.Accepted(null, new SuccessResponse<string>("Transaction queued"));
-}
-```
-- ✅ Swagger schema auto-generated
-- ✅ Compile-time return type checking
-- ✅ `TypedResults` avoids reflection in minimal APIs
-- ❌ More types to define
-
-### Recommendation
-- **New projects**: Use `TypedResults` + result records from start
-- **Existing projects**: Migrate incrementally, start with endpoints that return complex shapes
-
-## Cross-Cutting Concerns Patterns
-
-### Global Exception Handling (Already in skill)
-- `GlobalExceptionHandlerMiddleware` catches all unhandled exceptions
-- Maps exception types to HTTP status codes
-
-### Request/Response Logging
-```csharp
-public class RequestLoggingMiddleware {
+public class GlobalExceptionHandlerMiddleware {
     private readonly RequestDelegate _next;
-    private readonly ILogger<RequestLoggingMiddleware> _logger;
+    private readonly ILogger<GlobalExceptionHandlerMiddleware> _logger;
 
     public async Task InvokeAsync(HttpContext context) {
-        var sw = Stopwatch.StartNew();
         try {
             await _next(context);
-        } finally {
-            sw.Stop();
-            _logger.LogInformation("{Method} {Path} → {StatusCode} ({ElapsedMs}ms)",
-                context.Request.Method, context.Request.Path,
-                context.Response.StatusCode, sw.ElapsedMilliseconds);
+        } catch (DomainException ex) {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsJsonAsync(Result<object>.Fail(ex.Message));
+        } catch (Exception ex) {
+            _logger.LogError(ex, "Unhandled exception");
+            context.Response.StatusCode = 500;
+            await context.Response.WriteAsJsonAsync(Result<object>.Fail("An unexpected error occurred"));
         }
     }
 }
 ```
 
 ### Unit of Work Pattern
+
 ```csharp
-// For multi-step handlers that need transactional consistency
-public static async Task<IResult> Handle(
-    CreateOrderRequest request,
-    AppDbContext db) {
-    await using var transaction = await db.Database.BeginTransactionAsync();
+public override async Task HandleAsync(CreateOrderRequest req, CancellationToken ct) {
+    await using var transaction = await Db.Database.BeginTransactionAsync(ct);
     try {
-        // Step 1: Create order
-        // Step 2: Reserve inventory
-        // Step 3: Queue notification
-        await db.SaveChangesAsync();
-        await transaction.CommitAsync();
-        return Results.Created(...);
+        var order = Order.Create(req.CustomerId, req.Items);
+        Db.Orders.Add(order);
+        await Db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+        await SendCreatedAsync($"/api/v1/orders/{order.Id}", Result<Guid>.Ok(order.Id));
     } catch {
-        await transaction.RollbackAsync();
+        await transaction.RollbackAsync(ct);
         throw;
     }
 }
 ```
 
 ### Authorization Policies Per Feature
+
 ```csharp
-// In Program.cs or feature-specific registration
 builder.Services.AddAuthorizationBuilder()
     .AddPolicy("PartnerOnly", policy =>
         policy.Requirements.Add(new HmacRequirement()));
 
-// In endpoint
-app.MapPost("/api/v1/partner/transactions", Handle)
-   .RequireAuthorization("PartnerOnly");
+// In endpoint Configure()
+Policies("PartnerOnly");
 ```
 
 ## Folder Scaling
 
-### Small to Medium (<50 Features)
-```
-Features/
-├── Partners/
-│   ├── CreatePartner/
-│   │   ├── CreatePartnerEndpoint.cs
-│   │   ├── CreatePartnerRequest.cs
-│   │   └── CreatePartnerValidator.cs
-│   └── VerifyPartner/
-└── Transactions/
-    └── CreateTransaction/
-```
+- <20 features: single `Features/` folder
+- 20-50: sub-domain grouping (`Features/{Domain}/{SubDomain}/{Action}/`)
+- 50-200: consider separate `MyApp.Domain` project
+- 200+: multi-project solution with `Contracts` project for cross-boundary DTOs
 
-### Medium to Large (50-200 Features) — Sub-Domains
-```
-Features/
-├── Orders/
-│   ├── CreateOrder/
-│   ├── Fulfillment/
-│   │   ├── ShipOrder/
-│   │   └── CancelShipment/
-│   └── Reports/
-│       └── GetOrderSummary/
-└── Payments/
-    ├── ProcessPayment/
-    └── RefundPayment/
-```
-
-### Large / Multi-Team (200+ Features) — Separate Projects
-```
-src/
-├── MyApp.Api/              ← endpoints, DI
-├── MyApp.Domain/           ← entities, value objects, domain events
-├── MyApp.Contracts/        ← shared DTOs for external consumers
-├── MyApp.Infrastructure/   ← EF Core, messaging, external clients
-└── MyApp.Tests/
-```
 Only split when domain complexity or team boundaries justify it.
-
-### Scaling Checklist
-
-- [ ] <20 features: single `Features/` folder is fine
-- [ ] 20-50 features: use sub-domain grouping (`Features/{Domain}/{SubDomain}/{Action}/`)
-- [ ] 50-200 features: consider separate `MyApp.Domain` project
-- [ ] 200+ features: multi-project solution with `Contracts` project for cross-boundary DTOs
