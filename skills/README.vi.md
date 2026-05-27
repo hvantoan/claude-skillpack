@@ -62,7 +62,7 @@ Xem [INSTALLATION.md](INSTALLATION.md) để biết hướng dẫn chi tiết th
 |-------|-------|---------------|
 | **csharp-developer** | Xây dựng ứng dụng C# với .NET 8+, ASP.NET Core API, hoặc Blazor. REST API với minimal/controller routing, EF Core, CQRS qua MediatR, Blazor components với state management. | C#, .NET, ASP.NET Core, Blazor, EF Core, Minimal API, MAUI, SignalR |
 | **dotnet-core-expert** | Xây dựng ứng dụng .NET 8 với minimal API, clean architecture, hoặc cloud-native microservices. JWT authentication, AOT compilation. | .NET 8, minimal API, clean architecture, EF Core, CQRS, MediatR |
-| **dotnet-vsa** | Xây dựng dịch vụ .NET 8+ với Vertical Slice Architecture, Minimal APIs, FluentValidation, Refit+Polly, và RabbitMQ. Xác thực HMAC, resilience pipelines, kiểm tra tuân thủ kiến trúc. | dotnet, .NET, minimal API, vertical slice, FluentValidation, Refit, Polly, RabbitMQ, HMAC, endpoint, handler, validator |
+| **dotnet-vsa** | Xây dựng dịch vụ .NET 8+ với Vertical Slice Architecture sử dụng FastEndpoints, FluentValidation, Refit+Polly, và RabbitMQ. Pre/post-processors, route groups, xác thực HMAC, resilience pipelines, kiểm tra tuân thủ kiến trúc. | dotnet, .NET, FastEndpoints, vertical slice, FluentValidation, Refit, Polly, RabbitMQ, HMAC, endpoint, handler, validator |
 
 ## Backend & Hạ tầng
 

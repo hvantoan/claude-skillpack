@@ -32,7 +32,7 @@ npx skills add hvantoan/claude-skillpack@golang-pro -g
 |-------|-------|
 | **[csharp-developer](./skills/csharp-developer/)** | C# / .NET 8+ / ASP.NET Core / Blazor / EF Core / MediatR |
 | **[dotnet-core-expert](./skills/dotnet-core-expert/)** | .NET 8 minimal APIs / clean architecture / JWT / AOT |
-| **[dotnet-vsa](./skills/dotnet-vsa/)** | Vertical Slice Architecture / FluentValidation / Refit+Polly / RabbitMQ / HMAC auth |
+| **[dotnet-vsa](./skills/dotnet-vsa/)** | Vertical Slice Architecture / FastEndpoints / FluentValidation / Refit+Polly / RabbitMQ / HMAC auth |
 
 ### Backend & Hạ tầng
 

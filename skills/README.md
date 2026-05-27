@@ -66,7 +66,7 @@ See [INSTALLATION.md](INSTALLATION.md) for complete dependency list and platform
 |-------|-------------|----------|
 | **csharp-developer** | Build C# applications with .NET 8+, ASP.NET Core APIs, or Blazor web apps. REST APIs with minimal/controller routing, EF Core, CQRS via MediatR, Blazor components with state management. | C#, .NET, ASP.NET Core, Blazor, EF Core, Minimal API, MAUI, SignalR |
 | **dotnet-core-expert** | Build .NET 8 applications with minimal APIs, clean architecture, or cloud-native microservices. JWT authentication, AOT compilation. | .NET 8, minimal API, clean architecture, EF Core, CQRS, MediatR |
-| **dotnet-vsa** | Build .NET 8+ services with Vertical Slice Architecture, Minimal APIs, FluentValidation, Refit+Polly, and RabbitMQ. HMAC auth, resilience pipelines, architecture compliance verification. | dotnet, .NET, minimal API, vertical slice, FluentValidation, Refit, Polly, RabbitMQ, HMAC, endpoint, handler, validator |
+| **dotnet-vsa** | Build .NET 8+ services with Vertical Slice Architecture using FastEndpoints, FluentValidation, Refit+Polly, and RabbitMQ. Pre/post-processors, route groups, HMAC auth, resilience pipelines, architecture compliance verification. | dotnet, .NET, FastEndpoints, vertical slice, FluentValidation, Refit, Polly, RabbitMQ, HMAC, endpoint, handler, validator |
 
 ## Backend & Infrastructure
 
