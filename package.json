@@ -1,6 +1,6 @@
 {
   "name": "claude-skillpack",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "CLI to store and install Claude Code skills quickly on new projects or machines",
   "bin": {
     "claude-skillpack": "./bin/cli.js",
