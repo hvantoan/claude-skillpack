@@ -1,6 +1,6 @@
 ---
 name: dotnet-vsa
-description: Build .NET 8+ services with Vertical Slice Architecture using FastEndpoints, FluentValidation, Refit+Polly, and RabbitMQ. Use this skill whenever creating or modifying .NET API projects, adding endpoints or validators, setting up HMAC auth or resilience pipelines, implementing message queues, configuring DI, writing integration tests, enforcing VSA conventions, or generating .editorconfig. Triggers on: dotnet, .NET, FastEndpoints, vertical slice, FluentValidation, Refit, Polly, RabbitMQ, HMAC, endpoint, handler, validator, Program.cs, Result envelope, circuit breaker, VSA.
+description: "Build .NET 8+ services with Vertical Slice Architecture using FastEndpoints, FluentValidation, Refit+Polly, and RabbitMQ. Use this skill whenever creating or modifying .NET API projects, adding endpoints or validators, setting up HMAC auth or resilience pipelines, implementing message queues, configuring DI, writing integration tests, enforcing VSA conventions, or generating .editorconfig. Triggers on: dotnet, .NET, FastEndpoints, vertical slice, FluentValidation, Refit, Polly, RabbitMQ, HMAC, endpoint, handler, validator, Program.cs, Result envelope, circuit breaker, VSA."
 ---
 
 # .NET Vertical Slice Architecture
