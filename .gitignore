@@ -10,3 +10,5 @@ skills/**/*.pyc
 plans/
 .claude
 .agents
+.gemini/
+.antigravitycli
