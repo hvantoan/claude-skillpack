@@ -41,6 +41,7 @@ npx skills add hvantoan/claude-skillpack@golang-pro -g
 | **[golang-pro](./skills/golang-pro/)** | Go concurrency / gRPC / REST microservices / pprof / generics |
 | **[microservices-architect](./skills/microservices-architect/)** | DDD / saga / event sourcing / CQRS / service mesh |
 | **[postgres-pro](./skills/postgres-pro/)** | PostgreSQL query optimization / JSONB / replication / VACUUM |
+| **[database-design](./skills/database-design/)** | Schema design / normalization 1NF-3NF-BCNF / integrity constraints / relationships |
 
 ### Frontend Development
 
